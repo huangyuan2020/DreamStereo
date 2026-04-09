@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DreamStereo | CVPR 2026</title>
+
+    <!-- Basic SEO -->
+    <meta name="description" content="DreamStereo: real-time stereo inpainting for HD videos. GAPW + PBDP data construction and SASI sparse inference enable 768×1280@~25FPS (single A100, NFE=1)." />
+
+    <!-- Open Graph / Twitter (optional: add og:image as 1200×630 preview) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos" />
+    <meta property="og:description" content="Real-time stereo inpainting: 768×1280@~25FPS on a single A100 (NFE=1)." />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Favicon - Emoji -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥽</text></svg>" />
+
+    <style>
+      :root {
+        --bg: #0b0c10;
+        --panel: #12141b;
+        --text: #e8eaf1;
+        --muted: #a9afc3;
+        --brand: #7c5cff;
+        --brand2: #22c55e;
+        --border: rgba(255, 255, 255, 0.12);
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        --radius: 14px;
+        --max: 1040px;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+
+      /* Background video */
+      .bg-video {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        overflow: hidden;
+        background: var(--bg); /* 深色背景，视频加载前显示 */
+      }
+      .bg-video video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 200%; /* Double width to show only left half */
+        height: 100%;
+        object-fit: cover;
+        object-position: left center;
+      }
+      .bg-video::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(11, 12, 16, 0.6); /* Dark overlay for text readability - more transparent */
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+        color: var(--text);
+        background: transparent;
+        line-height: 1.55;
+      }
+
+      a { color: inherit; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      img { max-width: 100%; display: block; }
+
+      .container {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 24px 18px 64px;
+      }
+
+      header {
+        padding: 26px 0 12px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: color-mix(in oklab, var(--panel) 86%, transparent);
+        box-shadow: var(--shadow);
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--brand), var(--brand2));
+      }
+
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      nav a {
+        font-size: 13px;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: color-mix(in oklab, var(--panel) 72%, transparent);
+      }
+
+      .hero {
+        padding: 20px 0 10px;
+      }
+      h1 {
+        font-size: clamp(28px, 3.4vw, 42px);
+        margin: 8px 0 10px;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 16px;
+        margin: 0 0 18px;
+      }
+
+      .authors {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+        align-items: baseline;
+        margin: 10px 0 6px;
+      }
+      .authors a {
+        text-decoration: none;
+      }
+      .authors a.has-link {
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+      }
+
+      .aff {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 0 0 18px;
+      }
+
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 14px 0 22px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: color-mix(in oklab, var(--panel) 78%, transparent);
+        box-shadow: var(--shadow);
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .btn.primary {
+        border-color: color-mix(in oklab, var(--brand) 45%, var(--border));
+        background: linear-gradient(135deg, color-mix(in oklab, var(--brand) 38%, transparent), color-mix(in oklab, var(--brand2) 22%, transparent));
+      }
+      .btn:focus-visible {
+        outline: 3px solid color-mix(in oklab, var(--brand) 55%, transparent);
+        outline-offset: 2px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: color-mix(in oklab, var(--panel) 86%, transparent);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .card .hd {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .card .bd {
+        padding: 14px 16px;
+      }
+      .card h2 {
+        font-size: 16px;
+        margin: 0;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0;
+      }
+
+      .teaser {
+        aspect-ratio: 16/9;
+        width: 100%;
+        display: grid;
+        place-items: center;
+        background:
+          linear-gradient(135deg, rgba(124, 92, 255, 0.25), rgba(34, 197, 94, 0.12)),
+          repeating-linear-gradient(45deg, rgba(255,255,255,0.06) 0, rgba(255,255,255,0.06) 10px, transparent 10px, transparent 20px);
+      }
+      .teaser svg { width: 90%; height: auto; }
+      .teaser img { width: 100%; height: 100%; object-fit: contain; }
+
+      section { scroll-margin-top: 84px; }
+      .section {
+        margin-top: 16px;
+      }
+
+      .kvs {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 10px 12px;
+        font-size: 14px;
+      }
+      .kvs .k { color: var(--muted); }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: color-mix(in oklab, var(--panel) 92%, transparent);
+        overflow: auto;
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: color-mix(in oklab, var(--panel) 92%, transparent);
+      }
+      th, td {
+        padding: 10px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        font-size: 13px;
+      }
+      th { color: var(--muted); font-weight: 600; }
+      tr:last-child td { border-bottom: none; }
+
+      .mediaframe {
+        width: 100%;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: color-mix(in oklab, var(--panel) 92%, transparent);
+        overflow: hidden;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 12px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .split { grid-template-columns: 1fr; }
+      }
+
+      .pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .pair-realtime {
+        display: grid;
+        grid-template-columns: 1.58fr 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .pair-realtime img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      @media (max-width: 900px) {
+        .pair { grid-template-columns: 1fr; }
+        .pair-realtime { grid-template-columns: 1fr; }
+      }
+
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .pill {
+        display: inline-flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .pill a {
+        display: inline-flex;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: color-mix(in oklab, var(--panel) 82%, transparent);
+        font-size: 13px;
+      }
+
+      footer {
+        margin-top: 22px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Background video -->
+    <div class="bg-video">
+      <video id="bgVideo" autoplay muted loop playsinline preload="metadata">
+        <source src="videos/background.mp4" type="video/mp4" />
+      </video>
+    </div>
+
+    <div class="container">
+      <header>
+        <div class="topbar">
+          <div class="badge" title="Accepted at CVPR 2026">
+            <span class="dot" aria-hidden="true"></span>
+            <span>CVPR 2026 · Accepted · Project Page</span>
+          </div>
+          <nav aria-label="Navigation">
+            <a href="#speed">Method</a>
+            <a href="#results">Results</a>
+            <a href="#bibtex">BibTeX</a>
+          </nav>
+        </div>
+
+        <div class="hero">
+          <h1>DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos</h1>
+          <p class="subtitle">Real-time stereo inpainting at <strong>768×1280@~25FPS</strong> on a single A100 with <strong>NFE=1</strong>.</p>
+
+          <div class="authors" aria-label="Authors">
+            <a href="https://scholar.google.com/citations?user=aYbX2A0AAAAJ&hl=en" class="has-link">Yuan Huang<sup>*</sup>,</a>
+            <a href="https://sijeh.github.io/" class="has-link">Sijie Zhao<sup>*</sup>,</a>
+            <a href="#">Jing Cheng,</a>
+            <a href="#">Hao Xu,</a>
+            <a href="https://scholar.google.com/citations?user=TiTxZloAAAAJ&hl=en" class="has-link">Shaohui Jiao<sup>†</sup></a>
+          </div>
+          <p class="aff" style="font-size: 16px; color: var(--text); margin-bottom: 4px;">ByteDance</p>
+          <p class="hint" style="margin-top: 0;">*Equal contribution · †Corresponding author</p>
+          <div class="cta" aria-label="Quick links">
+            <a class="btn primary" href="DreamStereo.pdf" target="_blank" rel="noreferrer">📄 Paper (PDF)</a>
+            <a class="btn" href="videos/sbs_demo.zip" download>🎬 Side-by-Side Demo</a>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section class="section" id="Abstract">
+          <div class="card">
+            <div class="hd">
+              <h2>Abstract</h2>
+            </div>
+            <div class="bd">
+              <div class="split">
+                <div>
+                  <p style="margin-bottom: 12px;">
+                    <strong>Task.</strong> Mono-to-stereo video conversion via stereo inpainting, filling occlusions while maintaining geometric consistency and temporal coherence.
+                  </p>
+                  <p style="margin-bottom: 12px;">
+                    <strong>Method.</strong> <strong>DreamStereo</strong> enables real-time HD stereo inpainting through three key innovations:
+                  </p>
+                  <ul style="margin: 0 0 12px; padding-left: 18px;">
+                    <li><strong>GAPW</strong>, gradient-aware backward warping for clean occlusion boundaries</li>
+                    <li><strong>PBDP</strong>, pseudo-binocular data pipeline generating training pairs from monocular videos</li>
+                    <li><strong>SASI</strong>, sparse attention inference achieving 6× DiT speedup</li>
+                  </ul>
+                  <p>
+                    <strong>Performance.</strong> 768×1280@25FPS on A100 (40ms), 54ms on RTX 3090, 33ms on RTX 4090. First real-time HD stereo inpainting system.
+                  </p>
+                </div>
+                <div class="mediaframe">
+                  <img src="assets/fig1.png" alt="Figure 1" loading="lazy" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="speed">
+          <div class="card">
+            <div class="hd">
+              <h2>Real-Time</h2>
+              <p class="hint">Why it runs in real time</p>
+            </div>
+            <div class="bd">
+
+              <div class="mediaframe" style="margin-top: 12px;">
+                <img src="assets/SASI.png" alt="SASI" loading="lazy" />
+              </div>
+
+              <ul style="margin: 12px 0 0; padding-left: 18px;">
+                <li><strong>SASI</strong> prunes 70%+ redundant tokens during inference.</li>
+              </ul>
+              
+              <div class="split" style="margin-top: 12px;">
+                <div class="mediaframe">
+                  <img src="assets/speed.png" alt="Speed comparison" loading="lazy" />
+                </div>
+                <ul style="margin: 0; padding-left: 18px;">
+                  <li>Distilled VAE for accelerated codec.</li>
+                  <li><strong>NFE=1</strong> inference for real-time throughput.</li>
+                </ul>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="warp">
+          <div class="card">
+            <div class="hd">
+              <h2>Data Construction</h2>
+            </div>
+            <div class="bd">
+              <div class="split">
+                <div class="mediaframe">
+                  <img src="assets/PBDP.png" alt="PBDP" loading="lazy" />
+                </div>
+                <ul style="margin: 0; padding-left: 18px;">
+                  <li><strong>GAPW</strong>: backward warping + gradient-based occlusion masks for clean boundaries.</li>
+                  <li><strong>PBDP</strong>: dual projection to build pseudo-stereo pairs/masks from monocular videos.</li>
+                </ul>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+
+        <section class="section" id="data">
+          <div class="card">
+            <div class="hd">
+              <h2>Comparison Data</h2>
+            </div>
+            <div class="bd">
+              <video autoplay muted loop playsinline controls preload="metadata" style="width: 100%; border-radius: 12px; border: 1px solid var(--border); background: color-mix(in oklab, var(--panel) 92%, transparent); margin-bottom: 12px;">
+                <source src="assets/datadiff.mp4" type="video/mp4" />
+              </video>
+              <table aria-label="Data construction ablation">
+                <thead>
+                  <tr>
+                    <th>Data Construction Method</th>
+                    <th>PSNR ↑</th>
+                    <th>SSIM ↑</th>
+                    <th>LPIPS ↓</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Random Mask</td>
+                    <td>26.64</td>
+                    <td>0.906</td>
+                    <td>0.092</td>
+                  </tr>
+                  <tr>
+                    <td>TrajectoryCrafter (Forward Splating)</td>
+                    <td>31.14</td>
+                    <td>0.923</td>
+                    <td><strong>0.047</strong></td>
+                  </tr>
+                  <tr>
+                    <td>Ours (PBDP)</td>
+                    <td><strong>32.48</strong></td>
+                    <td><strong>0.933</strong></td>
+                    <td>0.049</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="results">
+          <div class="card">
+            <div class="hd">
+              <h2>Comparison of Stereo Inpainting</h2>
+            </div>
+            <div class="bd">
+              <style>
+                .video-tabs {
+                  display: flex;
+                  justify-content: center;
+                  gap: 12px;
+                  margin-top: 12px;
+                }
+                .video-tab {
+                  width: 12px;
+                  height: 12px;
+                  border-radius: 50%;
+                  background: var(--muted);
+                  cursor: pointer;
+                  transition: background 0.2s;
+                }
+                .video-tab.active {
+                  background: white;
+                }
+                .video-tab:hover {
+                  background: color-mix(in oklab, var(--muted) 70%, white);
+                }
+                .video-container {
+                  position: relative;
+                  width: 100%;
+                  aspect-ratio: 16/9;
+                }
+                .case-video {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 100%;
+                  border-radius: var(--radius);
+                  opacity: 0;
+                  pointer-events: none;
+                  transition: opacity 0.3s;
+                }
+                .case-video.active {
+                  opacity: 1;
+                  pointer-events: auto;
+                  z-index: 1;
+                }
+              </style>
+              <div class="video-container">
+                <video class="mediaframe case-video active" data-case="1" muted loop playsinline controls preload="metadata">
+                  <source src="videos/comparison_case1_h264.mp4" type="video/mp4" />
+                </video>
+                <video class="mediaframe case-video" data-case="2" muted loop playsinline controls preload="metadata">
+                  <source src="videos/comparison_case2_h264.mp4" type="video/mp4" />
+                </video>
+                <video class="mediaframe case-video" data-case="3" muted loop playsinline controls preload="metadata">
+                  <source src="videos/comparison_case3_h264.mp4" type="video/mp4" />
+                </video>
+              </div>
+              <div class="video-tabs">
+                <div class="video-tab active" data-case="1"></div>
+                <div class="video-tab" data-case="2"></div>
+                <div class="video-tab" data-case="3"></div>
+              </div>
+              <script>
+                (function() {
+                  const tabs = document.querySelectorAll('.video-tab');
+                  const videos = document.querySelectorAll('.case-video');
+                  tabs.forEach(tab => {
+                    tab.addEventListener('click', () => {
+                      const caseNum = tab.dataset.case;
+                      tabs.forEach(t => t.classList.remove('active'));
+                      videos.forEach(v => {
+                        v.classList.remove('active');
+                        v.pause();
+                      });
+                      tab.classList.add('active');
+                      const activeVideo = document.querySelector('.case-video[data-case="' + caseNum + '"]');
+                      if (activeVideo) {
+                        activeVideo.classList.add('active');
+                        activeVideo.play().catch(() => {});
+                      }
+                    });
+                  });
+                })();
+
+                // Intersection Observer: 视频进入视口时自动播放
+                (function() {
+                  const videos = document.querySelectorAll('.case-video');
+                  const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                      if (entry.isIntersecting && entry.target.classList.contains('active')) {
+                        entry.target.play().catch(() => {});
+                      }
+                    });
+                  }, { threshold: 0.5 });
+                  videos.forEach(v => observer.observe(v));
+                })();
+              </script>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="bibtex">
+          <div class="card">
+            <div class="hd">
+              <h2>BibTeX</h2>
+              <div class="pill">
+                <button class="btn" type="button" id="copyBib">Copy BibTeX</button>
+              </div>
+            </div>
+            <div class="bd">
+              <p class="hint" style="margin-bottom: 10px;">Cite:</p>
+              <pre id="bib">@inproceedings{Huang2026DreamStereo,
+  title     = {DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos},
+  author    = {Huang, Yuan and Zhao, Sijie and Cheng, Jing and Xu, Hao and Jiao, Shaohui},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2026}
+}
+              </pre>
+              <p class="hint">Tip: add arXiv id / pages / DOI for the camera-ready version.</p>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <footer>
+        <p>
+          © <span id="year"></span> DreamStereo authors · Static page.
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      // Lightweight: copy BibTeX, year, smooth scroll
+      (function () {
+        // Set background video playback speed to 0.5x
+        var bgVideo = document.getElementById('bgVideo');
+        if (bgVideo) {
+          bgVideo.playbackRate = 0.5;
+        }
+
+        var yearEl = document.getElementById('year');
+        if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+        var btn = document.getElementById('copyBib');
+        var pre = document.getElementById('bib');
+        if (btn && pre) {
+          btn.addEventListener('click', async function () {
+            var text = pre.textContent || '';
+            try {
+              await navigator.clipboard.writeText(text.trim() + '\n');
+              btn.textContent = 'Copied';
+              setTimeout(function () { btn.textContent = 'Copy BibTeX'; }, 1200);
+            } catch (e) {
+              // Fallback for environments without Clipboard API: select text
+              var range = document.createRange();
+              range.selectNodeContents(pre);
+              var sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+              btn.textContent = 'Selected';
+              setTimeout(function () { btn.textContent = 'Copy BibTeX'; }, 1200);
+            }
+          });
+        }
+
+        // Smooth scroll (respect reduced motion)
+        var prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (!prefersReduced) {
+          document.documentElement.style.scrollBehavior = 'smooth';
+        }
+      })();
+    </script>
+  </body>
+</html>

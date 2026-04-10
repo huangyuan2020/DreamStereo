@@ -49,10 +49,10 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 200%; /* Double width to show only left half */
+        width: 100%; /* 避免 2x 拉伸导致的模糊 */
         height: 100%;
         object-fit: cover;
-        object-position: left center;
+        object-position: center;
       }
       .bg-video::after {
         content: '';
